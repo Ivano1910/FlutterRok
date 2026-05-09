@@ -1,4 +1,5 @@
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -9,15 +10,19 @@ import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
 import 'services/notifications_service.dart';
 import 'services/fcm_service.dart';
+import 'screens/reset_password_screen.dart';
+import 'screens/verify_email_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Firebase.initializeApp();
-
-  await FcmService.init();
   await initializeDateFormatting('hr');
-  await NotificationsService.init();
+
+  if (!kIsWeb) {
+    await Firebase.initializeApp();
+    await FcmService.init();
+    await NotificationsService.init();
+  }
 
   runApp(
     const ProviderScope(
@@ -32,6 +37,36 @@ class BarberApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final authState = ref.watch(authProvider);
+
+    Widget startScreen;
+
+    if (kIsWeb) {
+      final uri = Uri.base;
+
+      if (uri.path == '/reset-password') {
+        final token = uri.queryParameters['token'] ?? '';
+        startScreen = ResetPasswordScreen(token: token);
+      } else if (uri.path == '/verify-email') {
+        final token = uri.queryParameters['token'] ?? '';
+        startScreen = VerifyEmailScreen(token: token);
+      } else {
+        startScreen = authState == null
+            ? const Scaffold(
+                body: Center(child: CircularProgressIndicator()),
+              )
+            : authState
+                ? const HomeScreen()
+                : const LoginScreen();
+      }
+    } else {
+      startScreen = authState == null
+          ? const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            )
+          : authState
+              ? const HomeScreen()
+              : const LoginScreen();
+    }
 
     return MaterialApp(
       title: 'Barber Rok',
@@ -74,11 +109,7 @@ class BarberApp extends ConsumerWidget {
           ),
         ),
       ),
-      home: authState == null
-          ? const Scaffold(body: Center(child: CircularProgressIndicator()))
-          : authState
-              ? const HomeScreen()
-              : const LoginScreen(),
+      home: startScreen,
     );
   }
 }

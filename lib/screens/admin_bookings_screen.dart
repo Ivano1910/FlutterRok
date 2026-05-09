@@ -110,15 +110,18 @@ class _AdminBookingsScreenState extends ConsumerState<AdminBookingsScreen> {
   }
 
   String _displayName(Map<String, dynamic> b) {
+    final customerName = (b['customer_name'] ?? '').toString().trim();
+    if (customerName.isNotEmpty) return customerName;
+
+    final parentName = (b['parent_name'] ?? '').toString().trim();
+    if (parentName.isNotEmpty) return parentName;
+
     final first = (b['first_name'] ?? '').toString().trim();
     final last = (b['last_name'] ?? '').toString().trim();
     final full = ('$first $last').trim();
     if (full.isNotEmpty) return full;
 
-    final cn = (b['customer_name'] ?? '').toString().trim();
-    if (cn.isNotEmpty) return cn;
-
-    final email = (b['user_email'] ?? '').toString().trim();
+    final email = (b['user_email'] ?? b['email'] ?? '').toString().trim();
     if (email.isNotEmpty) return email;
 
     return 'Nepoznato';

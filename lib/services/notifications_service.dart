@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
@@ -14,7 +12,7 @@ class NotificationsService {
   static bool _initialized = false;
 
   static Future<void> init() async {
-    if (_initialized) return;
+    if (_initialized || kIsWeb) return;
 
     tz.initializeTimeZones();
     tz.setLocalLocation(tz.getLocation('Europe/Zagreb'));
@@ -33,7 +31,7 @@ class NotificationsService {
 
     await _plugin.initialize(initSettings);
 
-    if (Platform.isAndroid) {
+    if (defaultTargetPlatform == TargetPlatform.android) {
       final android = _plugin.resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin>();
 
@@ -61,6 +59,7 @@ class NotificationsService {
   );
 
   static Future<void> debugNotification() async {
+    if (kIsWeb) return;
     if (!_initialized) await init();
 
     await _plugin.show(
@@ -79,6 +78,7 @@ class NotificationsService {
     required DateTime bookingStartLocal,
     required String titleName,
   }) async {
+    if (kIsWeb) return;
     if (!_initialized) await init();
 
     final now = DateTime.now();
@@ -90,8 +90,6 @@ class NotificationsService {
       return;
     }
 
-    // TESTING MODE:
-    // Keep these short while debugging
     final when24h = now.add(const Duration(seconds: 15));
     final when1h = now.add(const Duration(seconds: 30));
 
@@ -140,6 +138,7 @@ class NotificationsService {
   }
 
   static Future<void> cancelBookingReminders(int bookingId) async {
+    if (kIsWeb) return;
     if (!_initialized) await init();
     await _plugin.cancel(_id24h(bookingId));
     await _plugin.cancel(_id1h(bookingId));
@@ -149,6 +148,7 @@ class NotificationsService {
     required String title,
     required String body,
   }) async {
+    if (kIsWeb) return;
     if (!_initialized) await init();
 
     const details = NotificationDetails(
@@ -162,13 +162,13 @@ class NotificationsService {
       iOS: DarwinNotificationDetails(),
     );
 
-  await _plugin.show(
-    DateTime.now().millisecondsSinceEpoch ~/ 1000,
-    title,
-    body,
-    details,
-  );
-}
+    await _plugin.show(
+      DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      title,
+      body,
+      details,
+    );
+  }
 
   static String _fmt(DateTime dt) {
     final dd = dt.day.toString().padLeft(2, '0');

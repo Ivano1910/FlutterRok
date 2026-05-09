@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'providers.dart';
 import '../services/fcm_service.dart';
@@ -14,11 +15,8 @@ class AuthNotifier extends StateNotifier<bool?> {
   Future<void> checkLoginStatus() async {
     try {
       final token = await _ref.read(tokenStorageProvider).getToken();
-      // If mounted check is not available in StateNotifier, we just set state.
-      // StateNotifier disposes automatically when provider is disposed, but here it's likely alive for app life.
       state = token != null;
     } catch (e) {
-      // In case of storage error, default to unauthenticated
       state = false;
     }
   }
@@ -28,18 +26,26 @@ class AuthNotifier extends StateNotifier<bool?> {
     state = true;
 
     try {
-      final fcmToken = await FcmService.init();
+      if (!kIsWeb) {
+        final fcmToken = await FcmService.init();
 
-      if (fcmToken != null) {
-        final api = _ref.read(apiServiceProvider);
+        if (fcmToken != null) {
+          final api = _ref.read(apiServiceProvider);
 
-        await api.registerDeviceToken(
-          token: fcmToken,
-          platform: 'android',
-        );
+          final platform = defaultTargetPlatform == TargetPlatform.iOS
+              ? 'ios'
+              : 'android';
+
+          await api.registerDeviceToken(
+            token: fcmToken,
+            platform: platform,
+          );
+        }
       }
     } catch (e) {
-      print("Failed to register FCM token: $e");
+      if (kDebugMode) {
+        print("Failed to register FCM token: $e");
+      }
     }
   }
 
@@ -47,7 +53,7 @@ class AuthNotifier extends StateNotifier<bool?> {
     await _ref.read(tokenStorageProvider).deleteToken();
     await _ref.read(tokenStorageProvider).deleteProfile();
     state = false;
-  } 
+  }
 }
 
 final authProvider = StateNotifierProvider<AuthNotifier, bool?>((ref) {

@@ -1,43 +1,42 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../providers/providers.dart';
-import '../providers/auth_provider.dart';
-import '../widgets/app_shell.dart';
-import 'register_screen.dart';
-import 'forgot_password_screen.dart';
 
-class LoginScreen extends ConsumerStatefulWidget {
-  const LoginScreen({super.key});
+import '../providers/providers.dart';
+import '../widgets/app_shell.dart';
+
+class ForgotPasswordScreen extends ConsumerStatefulWidget {
+  const ForgotPasswordScreen({super.key});
 
   @override
-  ConsumerState<LoginScreen> createState() => _LoginScreenState();
+  ConsumerState<ForgotPasswordScreen> createState() => _ForgotPasswordScreenState();
 }
 
-class _LoginScreenState extends ConsumerState<LoginScreen> {
-  final _usernameController = TextEditingController();
-  final _passwordController = TextEditingController();
+class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
+  final _emailController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
 
   bool _isLoading = false;
   String? _errorMessage;
+  String? _successMessage;
 
-  Future<void> _login() async {
+  Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _successMessage = null;
     });
 
     try {
       final api = ref.read(apiServiceProvider);
 
-      final token = await api.login(
-        _usernameController.text.trim(),
-        _passwordController.text.trim(),
-      );
+      await api.forgotPassword(_emailController.text.trim());
 
-      await ref.read(authProvider.notifier).login(token);
+      setState(() {
+        _successMessage =
+            'Ako račun postoji, poslali smo email za reset lozinke.';
+      });
     } catch (e) {
       setState(() {
         _errorMessage = e.toString();
@@ -53,14 +52,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   void dispose() {
-    _usernameController.dispose();
-    _passwordController.dispose();
+    _emailController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(title: const Text('Zaboravljena lozinka')),
       body: AppShell(
         maxWidth: 480,
         child: Center(
@@ -74,39 +73,33 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.content_cut, size: 64, color: Colors.teal),
+                      const Icon(Icons.lock_reset, size: 64, color: Colors.teal),
                       const SizedBox(height: 20),
                       Text(
-                        'Barber Rok',
+                        'Reset lozinke',
                         textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.headlineMedium,
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'Prijavite se za rezervaciju termina',
+                        'Unesite svoj email i poslat ćemo vam link za reset lozinke.',
                         textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                       const SizedBox(height: 32),
                       TextFormField(
-                        controller: _usernameController,
+                        controller: _emailController,
+                        keyboardType: TextInputType.emailAddress,
                         decoration: const InputDecoration(
                           labelText: 'Email',
-                          prefixIcon: Icon(Icons.person),
+                          prefixIcon: Icon(Icons.email),
                         ),
-                        validator: (value) =>
-                            (value == null || value.trim().isEmpty) ? 'Required' : null,
-                      ),
-                      const SizedBox(height: 16),
-                      TextFormField(
-                        controller: _passwordController,
-                        decoration: const InputDecoration(
-                          labelText: 'Password',
-                          prefixIcon: Icon(Icons.lock),
-                        ),
-                        obscureText: true,
-                        validator: (value) =>
-                            (value == null || value.trim().isEmpty) ? 'Required' : null,
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Unesite email';
+                          }
+                          return null;
+                        },
                       ),
                       if (_errorMessage != null) ...[
                         const SizedBox(height: 16),
@@ -116,9 +109,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           textAlign: TextAlign.center,
                         ),
                       ],
+                      if (_successMessage != null) ...[
+                        const SizedBox(height: 16),
+                        Text(
+                          _successMessage!,
+                          style: const TextStyle(color: Colors.green),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
                       const SizedBox(height: 24),
                       FilledButton(
-                        onPressed: _isLoading ? null : _login,
+                        onPressed: _isLoading ? null : _submit,
                         style: FilledButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 16),
                         ),
@@ -131,34 +132,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   color: Colors.white,
                                 ),
                               )
-                            : const Text('Login'),
-                      ),
-                      const SizedBox(height: 12),
-                      TextButton(
-                        onPressed: _isLoading
-                            ? null
-                            : () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => const ForgotPasswordScreen(),
-                                  ),
-                                );
-                              },
-                        child: const Text('Zaboravili ste lozinku?'),
-                      ),
-                      TextButton(
-                        onPressed: _isLoading
-                            ? null
-                            : () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => const RegisterScreen(),
-                                  ),
-                                );
-                              },
-                        child: const Text('Nemate račun? Registrirajte se!'),
+                            : const Text('Pošalji link'),
                       ),
                     ],
                   ),

@@ -4,8 +4,9 @@ import 'token_storage.dart';
 import '../providers/auth_provider.dart';
 import '../services/notifications_service.dart';
 
-
 class ApiService {
+  static const String businessSlug = 'barber-rok';
+
   final Dio _dio;
   final TokenStorage _tokenStorage;
   final Ref _ref;
@@ -13,19 +14,28 @@ class ApiService {
   ApiService(this._tokenStorage, this._ref)
       : _dio = Dio(
           BaseOptions(
-            baseUrl: 'http://192.168.18.229:8000',
+            baseUrl: 'https://booking-production-84a4.up.railway.app',
             connectTimeout: const Duration(seconds: 10),
             receiveTimeout: const Duration(seconds: 10),
+            headers: {
+              'X-Business-Slug': 'barber-rok',
+            },
           ),
         ) {
     _dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) async {
-          // ✅ NEVER attach token to auth endpoints
+          options.headers['X-Business-Slug'] = businessSlug;
+
           final path = options.path;
 
-          if (path != '/login' && path != '/register') {
+          if (path != '/login' &&
+              path != '/register' &&
+              path != '/forgot-password' &&
+              path != '/reset-password' &&
+              path != '/verify-email') {
             final token = await _tokenStorage.getToken();
+
             if (token != null) {
               options.headers['Authorization'] = 'Bearer $token';
             }
@@ -38,18 +48,18 @@ class ApiService {
         onError: (DioException e, handler) async {
           final path = e.requestOptions.path;
 
-          // ✅ ignore 401 from login/register (wrong creds etc)
-          if (e.response?.statusCode == 401 && path != '/login' && path != '/register') {
+          if (e.response?.statusCode == 401 &&
+              path != '/login' &&
+              path != '/register') {
             await _ref.read(authProvider.notifier).logout();
-        }
+          }
 
-        return handler.next(e);
-      },
+          return handler.next(e);
+        },
       ),
     );
   }
 
-  // Keep this so older code using .client won't crash
   Dio get client => _dio;
 
   // ---------- AUTH ----------
@@ -65,10 +75,91 @@ class ApiService {
       );
 
       final token = res.data['access_token'];
+
       if (token == null || token is! String) {
         throw Exception('Token missing in response');
       }
+
       return token;
+    } on DioException catch (e) {
+      throw _prettyError(e);
+    }
+  }
+
+  Future<void> register({
+    required String email,
+    required String password,
+    required String registrationCode,
+    required String firstName,
+    required String lastName,
+    required String phone,
+  }) async {
+    try {
+      await _dio.post(
+        '/register',
+        data: {
+          'email': email,
+          'password': password,
+          'registration_code': registrationCode,
+          'first_name': firstName,
+          'last_name': lastName,
+          'phone': phone,
+        },
+        options: Options(contentType: Headers.jsonContentType),
+      );
+    } on DioException catch (e) {
+      throw _prettyError(e);
+    }
+  }
+
+  Future<void> forgotPassword(String email) async {
+    try {
+      await _dio.post(
+        '/forgot-password',
+        data: {
+          'email': email,
+        },
+      );
+    } on DioException catch (e) {
+      throw _prettyError(e);
+    }
+  }
+
+  Future<void> resetPassword({
+    required String token,
+    required String newPassword,
+  }) async {
+    try {
+      await _dio.post(
+        '/reset-password',
+        data: {
+          'token': token,
+          'new_password': newPassword,
+        },
+      );
+    } on DioException catch (e) {
+      throw _prettyError(e);
+    }
+  }
+
+  Future<void> verifyEmail(String token) async {
+    try {
+      await _dio.get(
+        '/verify-email',
+        queryParameters: {
+          'token': token,
+        },
+      );
+    } on DioException catch (e) {
+      throw _prettyError(e);
+    }
+  }
+
+  // ---------- USER ----------
+  Future<Map<String, dynamic>> getMe() async {
+    try {
+      final res = await _dio.get('/me');
+      return Map<String, dynamic>.from(res.data['user']);
     } on DioException catch (e) {
       throw _prettyError(e);
     }
@@ -77,9 +168,20 @@ class ApiService {
   // ---------- AVAILABILITY ----------
   Future<List<String>> getAvailability(String day) async {
     try {
-      final res = await _dio.get('/availability', queryParameters: {'day': day});
+      final res = await _dio.get(
+        '/availability',
+        queryParameters: {'day': day},
+      );
+
       final slots = (res.data['slots'] as List?) ?? [];
-      return slots.map((e) => e.toString()).toList();
+
+      return slots.map((e) {
+        if (e is Map && e['start_time'] != null) {
+          return e['start_time'].toString();
+        }
+
+        return e.toString();
+      }).toList();
     } on DioException catch (e) {
       throw _prettyError(e);
     }
@@ -130,6 +232,7 @@ class ApiService {
   Future<void> cancelBooking(int id) async {
     try {
       final res = await _dio.delete('/bookings/$id');
+
       if (res.statusCode != 204) {
         throw Exception('Cancel failed');
       }
@@ -140,41 +243,37 @@ class ApiService {
     }
   }
 
-  Future<void> register({
-    required String email,
-    required String password,
-    required String registrationCode,
-    required String firstName,
-    required String lastName,
-    required String phone,
-  }) async {
+  // ---------- ADMIN BOOKINGS ----------
+  Future<List<Map<String, dynamic>>> adminGetBookings(String day) async {
     try {
-      await _dio.post(
-        '/register',
-        data: {
-          'email': email,
-          'password': password,
-          'registration_code': registrationCode,
-          'first_name': firstName,
-          'last_name': lastName,
-          'phone': phone,
+      final res = await _dio.get(
+        '/admin/bookings',
+        queryParameters: {
+          'day': day,
         },
-        options: Options(contentType: Headers.jsonContentType),
       );
+
+      final list = (res.data['bookings'] as List?) ?? [];
+      return list.map((e) => Map<String, dynamic>.from(e)).toList();
     } on DioException catch (e) {
       throw _prettyError(e);
     }
   }
 
+  // ---------- ADMIN WORKING DAYS ----------
   Future<List<Map<String, dynamic>>> adminListWorkingDays({
-    required String start, // YYYY-MM-DD
-    required String end,   // YYYY-MM-DD
+    required String start,
+    required String end,
   }) async {
     try {
       final res = await _dio.get(
         '/admin/working-days',
-        queryParameters: {'start': start, 'end': end},
+        queryParameters: {
+          'start': start,
+          'end': end,
+        },
       );
+
       final list = (res.data['days'] as List?) ?? [];
       return list.map((e) => Map<String, dynamic>.from(e)).toList();
     } on DioException catch (e) {
@@ -183,10 +282,10 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> adminUpsertWorkingDay({
-    required String day, // YYYY-MM-DD
+    required String day,
     required bool isClosed,
-    String? openTime,  // "HH:MM" or null
-    String? closeTime, // "HH:MM" or null
+    String? openTime,
+    String? closeTime,
   }) async {
     try {
       final res = await _dio.put(
@@ -197,6 +296,7 @@ class ApiService {
           'is_closed': isClosed,
         },
       );
+
       return Map<String, dynamic>.from(res.data['working_day']);
     } on DioException catch (e) {
       throw _prettyError(e);
@@ -211,37 +311,112 @@ class ApiService {
     }
   }
 
-  Future<List<Map<String, dynamic>>> adminGetBookings(String day) async {
+  // ---------- ADMIN PERIODS ----------
+  Future<List<Map<String, dynamic>>> adminGetPeriods(String day) async {
     try {
-      final res = await _dio.get(
-        '/admin/bookings',
-        queryParameters: {'day': day},
-      );
-
-      final list = (res.data['bookings'] as List?) ?? [];
+      final res = await _dio.get('/admin/working-days/$day/periods');
+      final list = (res.data['periods'] as List?) ?? [];
       return list.map((e) => Map<String, dynamic>.from(e)).toList();
     } on DioException catch (e) {
       throw _prettyError(e);
-    } 
-  }
-
-  // ---------- ERRORS ----------
-  String _prettyError(DioException e) {
-    final status = e.response?.statusCode;
-
-    if (status == 409) return "Odabrani termin je zauzet.";
-    if (status == 429) return "Previše zahtjeva. Pokušajte kasnije.";
-    // Let backend detail show for 400
-    if (status == 401) return "Neispravni podaci ili istekla sesija.";
-
-    final data = e.response?.data;
-    if (data is Map && data['detail'] != null) {
-      return data['detail'].toString();
     }
-    return "Greška u komunikaciji s poslužiteljem.";
   }
 
-    // ---------- WAITLIST ----------
+  Future<void> adminSetPeriods(
+    String day,
+    List<Map<String, String>> periods,
+  ) async {
+    try {
+      await _dio.put(
+        '/admin/working-days/$day/periods',
+        data: {
+          'periods': periods,
+        },
+      );
+    } on DioException catch (e) {
+      throw _prettyError(e);
+    }
+  }
+
+  Future<void> adminClearPeriods(String day) async {
+    try {
+      await _dio.delete('/admin/working-days/$day/periods');
+    } on DioException catch (e) {
+      throw _prettyError(e);
+    }
+  }
+
+  // ---------- ADMIN WEEKLY SCHEDULE ----------
+  Future<List<Map<String, dynamic>>> adminGetWeeklyPeriods() async {
+    try {
+      final res = await _dio.get('/admin/weekly-periods');
+      final list = (res.data['periods'] as List?) ?? [];
+      return list.map((e) => Map<String, dynamic>.from(e)).toList();
+    } on DioException catch (e) {
+      throw _prettyError(e);
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> adminPutWeeklyPeriods({
+    required int weekday,
+    required List<Map<String, String>> periods,
+  }) async {
+    try {
+      final res = await _dio.put(
+        '/admin/weekly-periods/$weekday',
+        data: {
+          'periods': periods,
+        },
+      );
+
+      final list = (res.data['periods'] as List?) ?? [];
+      return list.map((e) => Map<String, dynamic>.from(e)).toList();
+    } on DioException catch (e) {
+      throw _prettyError(e);
+    }
+  }
+
+  // ---------- ADMIN OVERRIDES ----------
+  Future<Map<String, dynamic>> adminGetOverride(String day) async {
+    try {
+      final res = await _dio.get('/admin/overrides/$day');
+      return Map<String, dynamic>.from(res.data);
+    } on DioException catch (e) {
+      throw _prettyError(e);
+    }
+  }
+
+  Future<Map<String, dynamic>> adminPutOverride({
+    required String day,
+    required bool isClosed,
+    String? note,
+    required List<Map<String, String>> periods,
+  }) async {
+    try {
+      final res = await _dio.put(
+        '/admin/overrides/$day',
+        data: {
+          'is_closed': isClosed,
+          'note': note,
+          'periods': periods,
+        },
+      );
+
+      return Map<String, dynamic>.from(res.data);
+    } on DioException catch (e) {
+      throw _prettyError(e);
+    }
+  }
+
+  Future<void> adminDeleteOverride(String day) async {
+    try {
+      await _dio.delete('/admin/overrides/$day');
+    } on DioException catch (e) {
+      throw _prettyError(e);
+    }
+  }
+
+  // ---------- WAITLIST ----------
   Future<Map<String, dynamic>> getMyWaitlist() async {
     try {
       final res = await _dio.get('/me/waitlist');
@@ -252,15 +427,15 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> joinWaitlist({
-    required int days, // 3 / 7 / 14
-    String? windowStart, // "HH:mm"
-    String? windowEnd,   // "HH:mm"
+    required int days,
+    String? windowStart,
+    String? windowEnd,
   }) async {
     try {
       final data = <String, dynamic>{
         'days': days,
-        'window_start': ?windowStart,
-        'window_end': ?windowEnd,
+        'window_start': windowStart,
+        'window_end': windowEnd,
       };
 
       final res = await _dio.post('/waitlist', data: data);
@@ -277,105 +452,8 @@ class ApiService {
       throw _prettyError(e);
     }
   }
-    // ---------- ADMIN PERIODS ----------
-  Future<List<Map<String, dynamic>>> adminGetPeriods(String day) async {
-    try {
-      final res = await _dio.get('/admin/working-days/$day/periods');
-      final list = (res.data['periods'] as List?) ?? [];
-      return list.map((e) => Map<String, dynamic>.from(e)).toList();
-    } on DioException catch (e) {
-      throw _prettyError(e);
-    }
-  }
 
-  Future<void> adminSetPeriods(String day, List<Map<String, String>> periods) async {
-    try {
-      await _dio.put(
-        '/admin/working-days/$day/periods',
-        data: {'periods': periods},
-      );
-    } on DioException catch (e) {
-      throw _prettyError(e);
-    }
-  }
-
-  Future<void> adminClearPeriods(String day) async {
-    try {
-      await _dio.delete('/admin/working-days/$day/periods');
-    } on DioException catch (e) {
-      throw _prettyError(e);
-    }
-  }
-  // ---------- ADMIN: WEEKLY SCHEDULE ----------
-
-// Returns: [{"weekday":0,"start_time":"08:00:00","end_time":"13:00:00"}, ...]
-Future<List<Map<String, dynamic>>> adminGetWeeklyPeriods() async {
-  try {
-    final res = await _dio.get('/admin/weekly-periods');
-    final list = (res.data['periods'] as List?) ?? [];
-    return list.map((e) => Map<String, dynamic>.from(e)).toList();
-  } on DioException catch (e) {
-    throw _prettyError(e);
-  }
-}
-
-// periods: [{"start_time":"08:00:00","end_time":"13:00:00"}, ...]
-Future<List<Map<String, dynamic>>> adminPutWeeklyPeriods({
-  required int weekday, // 0..6
-  required List<Map<String, String>> periods,
-}) async {
-  try {
-    final res = await _dio.put(
-      '/admin/weekly-periods/$weekday',
-      data: {'periods': periods},
-    );
-    final list = (res.data['periods'] as List?) ?? [];
-    return list.map((e) => Map<String, dynamic>.from(e)).toList();
-  } on DioException catch (e) {
-    throw _prettyError(e);
-  }
-}
-
-// ---------- ADMIN: OVERRIDES ----------
-
-// Returns: {override: {...} or null, periods: [...]}
-Future<Map<String, dynamic>> adminGetOverride(String day) async {
-  try {
-    final res = await _dio.get('/admin/overrides/$day');
-    return Map<String, dynamic>.from(res.data);
-  } on DioException catch (e) {
-    throw _prettyError(e);
-  }
-}
-
-Future<Map<String, dynamic>> adminPutOverride({
-  required String day, // YYYY-MM-DD
-  required bool isClosed,
-  String? note,
-  required List<Map<String, String>> periods,
-}) async {
-  try {
-    final res = await _dio.put(
-      '/admin/overrides/$day',
-      data: {
-        'is_closed': isClosed,
-        'note': note,
-        'periods': periods,
-      },
-    );
-    return Map<String, dynamic>.from(res.data);
-  } on DioException catch (e) {
-    throw _prettyError(e);
-  }
-}
-
-Future<void> adminDeleteOverride(String day) async {
-  try {
-    await _dio.delete('/admin/overrides/$day');
-  } on DioException catch (e) {
-    throw _prettyError(e);
-  }
-}
+  // ---------- DEVICES ----------
   Future<void> registerDeviceToken({
     required String token,
     required String platform,
@@ -391,5 +469,22 @@ Future<void> adminDeleteOverride(String day) async {
     } on DioException catch (e) {
       throw _prettyError(e);
     }
+  }
+
+  // ---------- ERRORS ----------
+  String _prettyError(DioException e) {
+    final status = e.response?.statusCode;
+
+    if (status == 409) return 'Odabrani termin je zauzet.';
+    if (status == 429) return 'Previše zahtjeva. Pokušajte kasnije.';
+    if (status == 401) return 'Neispravni podaci ili istekla sesija.';
+
+    final data = e.response?.data;
+
+    if (data is Map && data['detail'] != null) {
+      return data['detail'].toString();
+    }
+
+    return 'Greška u komunikaciji s poslužiteljem.';
   }
 }
